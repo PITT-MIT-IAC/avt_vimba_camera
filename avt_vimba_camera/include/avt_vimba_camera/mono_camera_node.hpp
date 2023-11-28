@@ -47,6 +47,9 @@
 #include <avt_vimba_camera_msgs/srv/load_settings.hpp>
 #include <avt_vimba_camera_msgs/srv/save_settings.hpp>
 
+#include "isaac_ros_managed_nitros/managed_nitros_publisher.hpp"
+#include "isaac_ros_nitros_image_type/nitros_image.hpp"
+
 
 namespace avt_vimba_camera
 {
@@ -67,12 +70,15 @@ private:
   std::string frame_id_;
   bool use_measurement_time_;
   bool publish_compressed_;
+  bool publish_nitros_;
   int32_t ptp_offset_;
 
   image_transport::CameraPublisher camera_info_pub_;
+  std::shared_ptr<nvidia::isaac_ros::nitros::ManagedNitrosPublisher<
+      nvidia::isaac_ros::nitros::NitrosImage>> nitros_pub_;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr compressed_pub;
   std::shared_ptr<camera_info_manager::CameraInfoManager> info_man_;
-  
+
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_srv_;
 
