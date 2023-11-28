@@ -36,6 +36,11 @@
 #include <avt_vimba_camera_msgs/srv/load_settings.hpp>
 #include <avt_vimba_camera_msgs/srv/save_settings.hpp>
 
+#include <cuda_runtime.h>
+
+#include "isaac_ros_nitros_image_type/nitros_image_builder.hpp"
+#include "sensor_msgs/image_encodings.hpp"
+
 using namespace std::placeholders;
 
 namespace avt_vimba_camera
@@ -44,6 +49,7 @@ MonoCameraNode::MonoCameraNode() : Node("camera"), api_(this->get_logger()), cam
 {
   // Set the image publisher before streaming
   camera_info_pub_ = image_transport::create_camera_publisher(this, "~/image", rmw_qos_profile_sensor_data);
+
 
   // Set the frame callback
   cam_.setCallback(std::bind(&avt_vimba_camera::MonoCameraNode::frameCallback, this, _1));
@@ -62,6 +68,13 @@ MonoCameraNode::MonoCameraNode() : Node("camera"), api_(this->get_logger()), cam
   if (publish_compressed_) {
     compressed_pub = this->create_publisher<sensor_msgs::msg::CompressedImage>("~/image/compressed", qos);
   }
+  if (publish_nitros_) {
+  nitros_pub_ = std::make_shared<nvidia::isaac_ros::nitros::ManagedNitrosPublisher<
+        nvidia::isaac_ros::nitros::NitrosImage>>(
+      this, "gpu_image",
+      nvidia::isaac_ros::nitros::nitros_image_rgb8_t::supported_type_name);
+  }
+
 }
 
 MonoCameraNode::~MonoCameraNode()
@@ -79,6 +92,7 @@ void MonoCameraNode::loadParams()
   use_measurement_time_ = this->declare_parameter("use_measurement_time", false);
   ptp_offset_ = this->declare_parameter("ptp_offset", 0);
   publish_compressed_ = this->declare_parameter("publish_compressed", true);
+  publish_nitros_ = this->declare_parameter("publish_nitros", true);
 
   RCLCPP_INFO(this->get_logger(), "Parameters loaded");
 }
@@ -125,6 +139,25 @@ void MonoCameraNode::frameCallback(const FramePtr& vimba_frame_ptr)
         compressed_image.header.frame_id = ci.header.frame_id;
         compressed_image.header.stamp = ci.header.stamp;
         compressed_pub->publish(compressed_image);
+      }
+
+      if (publish_nitros_) {
+        void* buffer;
+        size_t buffer_size{img.step * img.height};
+
+        cudaMalloc(&buffer, buffer_size);
+        cudaMemcpy(buffer, img.data.data(), buffer_size, cudaMemcpyDefault);
+
+        nvidia::isaac_ros::nitros::NitrosImage nitros_image =
+          nvidia::isaac_ros::nitros::NitrosImageBuilder()
+          .WithHeader(img.header)
+          .WithEncoding(img_encodings::RGB8)
+          .WithDimensions(img.height, img.width)
+          .WithGpuData(buffer)
+          .Build();
+
+        nitros_pub_->publish(nitros_image);
+        RCLCPP_INFO(this->get_logger(), "Sent CUDA buffer with memory at: %p", buffer);
       }
     }
     else
